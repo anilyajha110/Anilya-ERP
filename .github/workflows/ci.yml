@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: localdev
+          POSTGRES_DB: anilya_erp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: localdev
+      PGDATABASE: anilya_erp
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck (every workspace)
+        run: npm run typecheck
+
+      - name: Apply database migrations
+        run: npm run db:migrate
+
+      - name: Run tests (every workspace)
+        run: npm run test
+
+      - name: Build (every workspace)
+        run: npm run build
+
+      # Placeholders for gates the blueprint requires that need tooling
+      # decisions beyond Phase 1's scope (dependency/secret scanning,
+      # SBOM generation) — left as explicit, visible TODOs rather than
+      # silently absent, per this project's own "no undocumented gap" rule.
+      - name: Dependency & secret scan (TODO — Phase 1 backlog item)
+        run: echo "TODO: wire in npm audit / a secret-scanning action before this gate is trusted"
+
+      - name: SBOM generation (TODO — Phase 1 backlog item)
+        run: echo "TODO: generate and publish an SBOM as a release artifact"

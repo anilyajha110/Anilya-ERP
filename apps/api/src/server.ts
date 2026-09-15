@@ -1,0 +1,70 @@
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
+import { pinoHttp } from "pino-http";
+import pg from "pg";
+import { loadConfig, type Config } from "./config/config.js";
+import { createLogger, type Logger } from "./shared/logger.js";
+import { correlationIdMiddleware } from "./shared/correlation-id.js";
+import { createHealthRouter } from "./shared/health.js";
+
+// Exported as a factory (not "start the server as a side effect of
+// importing this file") specifically so tests can build a real app
+// instance, against a real (test) database, without binding a port —
+// this is what makes apps/api/src/server.test.ts a genuine integration
+// test rather than a mock.
+export function buildApp(config: Config, pool: pg.Pool, logger: Logger): Express {
+  const app = express();
+  app.use(correlationIdMiddleware);
+  app.use(
+    pinoHttp({
+      logger,
+      genReqId: (req) => (req as Request).correlationId,
+      customLogLevel: (_req, res, err) => {
+        if (err || res.statusCode >= 500) return "error";
+        if (res.statusCode >= 400) return "warn";
+        return "info";
+      },
+    })
+  );
+  app.use(express.json({ limit: "1mb" }));
+
+  app.use(createHealthRouter(pool));
+
+  // Structured error handler — every unhandled error becomes a
+  // consistent JSON shape carrying the correlation id, never a stack
+  // trace leaked to the client (Phase 1 "structured errors").
+  app.use((err: Error, req: Request, res: Response, _next: NextFunction): void => {
+    req.log.error({ err }, "Unhandled error");
+    res.status(500).json({
+      error: "internal_server_error",
+      correlationId: req.correlationId,
+    });
+  });
+
+  return app;
+}
+
+async function main() {
+  const config = loadConfig();
+  const logger = createLogger(config);
+  const pool = new pg.Pool({
+    host: config.PGHOST,
+    port: config.PGPORT,
+    user: config.PGUSER,
+    password: config.PGPASSWORD,
+    database: config.PGDATABASE,
+  });
+
+  const app = buildApp(config, pool, logger);
+  app.listen(config.PORT, () => {
+    logger.info({ port: config.PORT, env: config.NODE_ENV }, "Anilya ERP API listening");
+  });
+}
+
+// Only auto-start when run directly (`node server.js`), not when
+// imported by a test.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error("Fatal startup error:", err);
+    process.exit(1);
+  });
+}

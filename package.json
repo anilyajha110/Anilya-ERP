@@ -1,0 +1,27 @@
+{
+  "name": "anilya-erp",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "lint": "eslint . --ext .ts",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:migrate": "npm run migrate --workspace=packages/database",
+    "db:migrate:down": "npm run migrate:down --workspace=packages/database",
+    "db:seed": "npm run seed --workspace=packages/database",
+    "verify": "npm run typecheck && npm run lint && npm run db:migrate && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@typescript-eslint/eslint-plugin": "^8.13.0",
+    "@typescript-eslint/parser": "^8.13.0",
+    "eslint": "^9.14.0",
+    "typescript": "^5.6.3",
+    "vitest": "^5.0.1"
+  }
+}
