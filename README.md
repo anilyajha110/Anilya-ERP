@@ -74,6 +74,25 @@ ghost directories.
 | Docker Compose file is syntactically what Postgres/Redis images expect | **Not verified** — Docker isn't available in the environment this was built in. Review before first real use. |
 | GitHub Actions workflow runs green on a real PR | **Not verified** — needs a real GitHub repository connected to Actions; the workflow steps mirror `npm run verify` exactly, which *is* verified, but the YAML itself has not been executed by a real runner. |
 
+## Getting this into your own GitHub repository
+
+I don't have credentials to push to your GitHub account, so this is a
+manual step (see the earlier chat message for why). From inside the
+extracted `anilya-erp/` folder:
+
+```bash
+# 1. Create an empty repository on GitHub first (no README/license —
+#    this project already has its own), then:
+git remote add origin https://github.com/<your-username>/<your-repo>.git
+git branch -M main
+git push -u origin main
+```
+
+The `.git` history (2 commits: initial Phase 1 foundation, then a
+lockfile regeneration after a clean-reinstall verification) is already
+included in this zip, so `git log` on your end will show the real
+build history, not a single squashed dump.
+
 ## Next: Phase 2
 
 Organization/Identity/RBAC/Audit, per `docs/PHASE_0_AUDIT_REPORT.md` §6
