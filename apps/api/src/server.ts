@@ -1,6 +1,7 @@
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { pinoHttp } from "pino-http";
 import pg from "pg";
+import { pathToFileURL } from "node:url";
 import { loadConfig, type Config } from "./config/config.js";
 import { createLogger, type Logger } from "./shared/logger.js";
 import { correlationIdMiddleware } from "./shared/correlation-id.js";
@@ -61,8 +62,13 @@ async function main() {
 }
 
 // Only auto-start when run directly (`node server.js`), not when
-// imported by a test.
-if (import.meta.url === `file://${process.argv[1]}`) {
+// imported by a test. Uses pathToFileURL rather than a raw string
+// comparison — a plain `file://${process.argv[1]}` breaks on Windows,
+// where backslash paths and drive-letter casing don't match the URL
+// format `import.meta.url` produces, silently skipping this whole
+// block (no error, no startup, no "listening" message — exactly the
+// symptom this fixes).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     console.error("Fatal startup error:", err);
     process.exit(1);
