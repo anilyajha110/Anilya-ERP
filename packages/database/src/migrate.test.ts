@@ -28,12 +28,19 @@ describe("migration runner", () => {
     expect(migrationRows).toHaveLength(1);
   });
 
-  it("'down' reverses the most recent migration and updates schema_migrations", () => {
+  it("'down' reverses whichever migration is currently the most recent, and updates schema_migrations to match", async () => {
+    // Deliberately does NOT hardcode which migration this is — that
+    // assumption (originally "it's always app_health") was exactly
+    // what broke here once Phase 2 added migrations after it. Ask the
+    // database what the latest applied migration actually is, then
+    // verify down() removes precisely that one.
+    const { rows: beforeRows } = await pool.query("SELECT id FROM schema_migrations ORDER BY id DESC LIMIT 1");
+    const latestId = beforeRows[0]!.id as string;
+
     execSync("tsx src/migrate.ts down", { cwd: process.cwd(), env: process.env });
-    const tableCheck = execSync(
-      `PGPASSWORD=${process.env.PGPASSWORD} psql -h ${process.env.PGHOST} -U ${process.env.PGUSER} -d ${process.env.PGDATABASE} -tAc "SELECT to_regclass('app_health')"`
-    ).toString().trim();
-    expect(tableCheck).toBe(""); // to_regclass returns empty/null when the table no longer exists
+
+    const { rows: afterRows } = await pool.query("SELECT id FROM schema_migrations WHERE id = $1", [latestId]);
+    expect(afterRows).toHaveLength(0); // the migration's own tracking row is gone
 
     // Leave the database in the "up" state for any other suite/dev workflow that follows.
     execSync("tsx src/migrate.ts up", { cwd: process.cwd(), env: process.env });
