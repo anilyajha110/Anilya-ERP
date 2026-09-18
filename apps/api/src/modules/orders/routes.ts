@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import type pg from "pg";
 import { requireAuth, requirePermission } from "../identity/rbac.js";
-import { createOrder, getOrderById, getOrderByTrackingToken, listOrdersForCustomer, transitionOrder, type Order } from "./order.service.js";
+import { createOrder, getOrderById, getOrderByTrackingToken, listOrdersForCustomer, transitionOrder, ArtworkNotPrintReadyError, type Order } from "./order.service.js";
 import { InvalidTransitionError } from "./state-machine.js";
 import { logActivity } from "../identity/audit.service.js";
 
@@ -37,13 +37,16 @@ export function createOrdersRouter(pool: pg.Pool): Router {
   // already found once in the CRM module's /customers/me). ---
 
   router.post("/orders/import", requireAuth(pool), requirePermission(pool, "orders.import"), async (req: Request, res: Response) => {
-    const { idempotencyKey, orgPrefix, productName, masterOrderId, shippingAddress, customerName, customerPhone, customerEmail } = req.body ?? {};
+    const { idempotencyKey, orgPrefix, productName, masterOrderId, shippingAddress, customerName, customerPhone, customerEmail, artworkIntent } = req.body ?? {};
     if (!idempotencyKey || !orgPrefix || !productName || !customerName) {
       return res.status(400).json({ error: "idempotencyKey, orgPrefix, productName, and customerName are required" });
     }
+    if (!["attachment", "no", "blank"].includes(artworkIntent)) {
+      return res.status(400).json({ error: "artworkIntent must be one of: attachment, no, blank" });
+    }
     const { order, wasNew } = await createOrder(pool, {
       organizationId: req.identity!.organization_id, idempotencyKey, orgPrefix, productName, masterOrderId, shippingAddress,
-      customerName, customerPhone, customerEmail, createdBy: req.identity!.id,
+      customerName, customerPhone, customerEmail, createdBy: req.identity!.id, artworkIntent,
     });
     if (wasNew) {
       await logActivity(pool, {
@@ -83,7 +86,7 @@ export function createOrdersRouter(pool: pg.Pool): Router {
       });
       res.json(order);
     } catch (err) {
-      if (err instanceof InvalidTransitionError) return res.status(409).json({ error: err.message });
+      if (err instanceof InvalidTransitionError || err instanceof ArtworkNotPrintReadyError) return res.status(409).json({ error: err.message });
       throw err;
     }
   });

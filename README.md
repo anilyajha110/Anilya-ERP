@@ -249,9 +249,70 @@ compounding rather than repeating.
   doesn't appear
 - A staff identity without `orders.import` is rejected (403)
 
-## Next: Phase 5
+## Phase 5 — Artwork Management (done)
 
-Per the blueprint's own module ordering: Artwork Management — the
-3-stage AMS approval sequence and the critical customer-approved-vs-
-print-ready distinction (ADR 0002), extending this phase's order
-lifecycle with artwork-specific stages.
+The single most safety-critical rule in the entire project (ADR 0002),
+now genuinely enforced by code and proven by tests that reproduce both
+historical failure modes exactly, not just asserted as a comment.
+
+### New endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| GET | /api/orders/:id/artwork/status | Current AMS stage, print-ready flag |
+| GET | /api/orders/:id/artwork/versions | Full 4-stage file history |
+| POST | /api/orders/:id/artwork/customer-upload | Stage 1 |
+| POST | /api/orders/:id/artwork/customer-approved | Stage 2 — locked reference only, never print-ready |
+| POST | /api/orders/:id/artwork/print-reviewed | Stage 3 — Operator's technical check |
+| POST | /api/orders/:id/artwork/print-approved | Stage 4 — **the only action that can ever set print-ready**, its own separate permission |
+
+### The rule itself (ADR 0002), and how it's actually enforced
+`order_artwork.print_ready` starts `false` and is set `true` in exactly
+one place in the entire codebase (`submitPrintApproval` in
+`artwork.service.ts`). `transitionOrder`'s `start` action (Phase 4)
+checks this flag before allowing an order into production — customer
+approval alone (`customer_approved_ref`) is stored only as a locked
+historical reference; nothing anywhere reads it to make that decision.
+
+Two regression tests reproduce the exact historical failure modes from
+the prototype's own history, not hypothetical ones:
+- **An order that only has customer approval** attempts to start
+  production → rejected (409), the exact bug an earlier prototype
+  version actually had before the internal-approval gate was added.
+- **A `blank`-intent order** (artwork never required at all) starts
+  production with zero AMS interaction → succeeds — the exact inverse
+  bug the print-ready gate itself introduced once, by blocking orders
+  that never needed a file in the first place.
+
+### A real bug found by the verify pipeline itself (not the tests)
+`npm run test` was silently running every test **twice** — once from
+`src/*.test.ts`, once from `dist/*.test.js` after a build, since
+neither workspace had a vitest config telling it to ignore compiled
+output. Not a correctness bug (both copies always agreed), but wrong
+and wasteful, and would have masked a real source/build divergence if
+one ever appeared. Fixed with a two-line `vitest.config.ts` in each
+workspace; verified by explicitly building first and then running
+tests against an already-populated `dist/`, confirming exactly 49
+tests run once, not 98.
+
+### Verified live (49 tests total now pass, all against real Postgres, from a genuinely fresh `node_modules` + database)
+- Full 4-stage flow (upload → customer-approved → print-reviewed →
+  print-approved) genuinely makes `print_ready = true` and clears
+  `ams_stage`, and only then does `start` succeed
+- `print-approved` attempted before any `print-reviewed` version exists
+  → rejected (409) — Stage 3 must happen before Stage 4
+- Version history returns all 4 stages in the correct order, each a
+  genuinely separate, immutable row
+- `'no'`-intent orders start at `artwork_creator`; `'attachment'`-intent
+  orders start at `artwork_verifier` — the right stage for the right
+  scenario, decided once at import
+- Ordinary staff (`orders.write` but not the separate
+  `orders.artwork.approve` permission) cannot give final print
+  approval (403) — the single most consequential action in this module
+  has its own, narrower permission, not bundled into general write access
+
+## Next: Phase 6
+
+Per the blueprint's own module ordering: Gang Run and Production —
+combining multiple print-ready orders into shared print runs, building
+on this phase's print-ready gate as the entry prerequisite every
+member order must already satisfy individually before pooling.

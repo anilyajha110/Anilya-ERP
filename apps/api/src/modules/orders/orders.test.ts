@@ -44,7 +44,7 @@ describe("Orders — idempotent import, state machine, tracking", () => {
   it("creates a new order on first import", async () => {
     const key = randomUUID();
     const res = await request(app).post("/api/orders/import").set("Authorization", `Bearer ${staffToken}`).send({
-      idempotencyKey: key, orgPrefix: "ANILYA", productName: "Business Cards", customerName: "Ramesh Kumar", customerPhone: "9990001111",
+      idempotencyKey: key, orgPrefix: "ANILYA", artworkIntent: "blank", productName: "Business Cards", customerName: "Ramesh Kumar", customerPhone: "9990001111",
     });
     expect(res.status).toBe(201);
     expect(res.body.wasNew).toBe(true);
@@ -55,10 +55,10 @@ describe("Orders — idempotent import, state machine, tracking", () => {
   it("CRITICAL — replaying the exact same idempotencyKey returns the SAME order, never a duplicate (fixes RISK-007)", async () => {
     const key = randomUUID();
     const first = await request(app).post("/api/orders/import").set("Authorization", `Bearer ${staffToken}`).send({
-      idempotencyKey: key, orgPrefix: "ANILYA", productName: "Visiting Cards", customerName: "Duplicate Test Customer",
+      idempotencyKey: key, orgPrefix: "ANILYA", artworkIntent: "blank", productName: "Visiting Cards", customerName: "Duplicate Test Customer",
     });
     const second = await request(app).post("/api/orders/import").set("Authorization", `Bearer ${staffToken}`).send({
-      idempotencyKey: key, orgPrefix: "ANILYA", productName: "Visiting Cards", customerName: "Duplicate Test Customer",
+      idempotencyKey: key, orgPrefix: "ANILYA", artworkIntent: "blank", productName: "Visiting Cards", customerName: "Duplicate Test Customer",
     });
     expect(first.status).toBe(201);
     expect(second.status).toBe(200); // not 201 — nothing new was created
@@ -71,17 +71,17 @@ describe("Orders — idempotent import, state machine, tracking", () => {
 
   it("display order numbers increment correctly and never collide under back-to-back imports", async () => {
     const a = await request(app).post("/api/orders/import").set("Authorization", `Bearer ${staffToken}`).send({
-      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", productName: "A", customerName: "Sequence Test A",
+      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", artworkIntent: "blank", productName: "A", customerName: "Sequence Test A",
     });
     const b = await request(app).post("/api/orders/import").set("Authorization", `Bearer ${staffToken}`).send({
-      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", productName: "B", customerName: "Sequence Test B",
+      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", artworkIntent: "blank", productName: "B", customerName: "Sequence Test B",
     });
     expect(a.body.display_order_number).not.toBe(b.body.display_order_number);
   });
 
   it("valid transition (confirm) succeeds and is captured in the audit log with old/new stage", async () => {
     const created = await request(app).post("/api/orders/import").set("Authorization", `Bearer ${staffToken}`).send({
-      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", productName: "Transition Test", customerName: "Transition Customer",
+      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", artworkIntent: "blank", productName: "Transition Test", customerName: "Transition Customer",
     });
     const res = await request(app).post(`/api/orders/${created.body.id}/confirm`).set("Authorization", `Bearer ${staffToken}`).send({});
     expect(res.status).toBe(200);
@@ -94,7 +94,7 @@ describe("Orders — idempotent import, state machine, tracking", () => {
 
   it("an invalid transition (completing an order that was never started) is rejected (409), not silently applied", async () => {
     const created = await request(app).post("/api/orders/import").set("Authorization", `Bearer ${staffToken}`).send({
-      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", productName: "Invalid Transition Test", customerName: "Invalid Transition Customer",
+      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", artworkIntent: "blank", productName: "Invalid Transition Test", customerName: "Invalid Transition Customer",
     });
     const res = await request(app).post(`/api/orders/${created.body.id}/complete`).set("Authorization", `Bearer ${staffToken}`).send({});
     expect(res.status).toBe(409);
@@ -102,7 +102,7 @@ describe("Orders — idempotent import, state machine, tracking", () => {
 
   it("cancelling without a reason is rejected (400)", async () => {
     const created = await request(app).post("/api/orders/import").set("Authorization", `Bearer ${staffToken}`).send({
-      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", productName: "Cancel Reason Test", customerName: "Cancel Reason Customer",
+      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", artworkIntent: "blank", productName: "Cancel Reason Test", customerName: "Cancel Reason Customer",
     });
     const res = await request(app).post(`/api/orders/${created.body.id}/cancel`).set("Authorization", `Bearer ${staffToken}`).send({});
     expect(res.status).toBe(400);
@@ -110,7 +110,7 @@ describe("Orders — idempotent import, state machine, tracking", () => {
 
   it("a completed order can never be cancelled — cancellation is only valid before completion", async () => {
     const created = await request(app).post("/api/orders/import").set("Authorization", `Bearer ${staffToken}`).send({
-      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", productName: "Completed Cancel Test", customerName: "Completed Cancel Customer",
+      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", artworkIntent: "blank", productName: "Completed Cancel Test", customerName: "Completed Cancel Customer",
     });
     await request(app).post(`/api/orders/${created.body.id}/confirm`).set("Authorization", `Bearer ${staffToken}`).send({});
     await request(app).post(`/api/orders/${created.body.id}/start`).set("Authorization", `Bearer ${staffToken}`).send({});
@@ -122,7 +122,7 @@ describe("Orders — idempotent import, state machine, tracking", () => {
 
   it("CRITICAL — the public tracking endpoint never includes phone or email (fixes ORD-005), even though the order has them", async () => {
     const created = await request(app).post("/api/orders/import").set("Authorization", `Bearer ${staffToken}`).send({
-      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", productName: "Privacy Test", customerName: "Privacy Customer",
+      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", artworkIntent: "blank", productName: "Privacy Test", customerName: "Privacy Customer",
       customerPhone: "9998887777", shippingAddress: "123 Main Street, Ranchi",
     });
     const track = await request(app).get(`/track/${created.body.tracking_token}`);
@@ -147,7 +147,7 @@ describe("Orders — idempotent import, state machine, tracking", () => {
     // Staff creates an order for a DIFFERENT customer by name — this
     // won't match Customer A's identity, so their /orders/me must stay empty.
     await request(app).post("/api/orders/import").set("Authorization", `Bearer ${staffToken}`).send({
-      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", productName: "Someone Else's Order", customerName: "A Totally Different Customer",
+      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", artworkIntent: "blank", productName: "Someone Else's Order", customerName: "A Totally Different Customer",
     });
 
     const mine = await request(app).get("/api/orders/me").set("Authorization", `Bearer ${tokenA}`);
@@ -161,7 +161,7 @@ describe("Orders — idempotent import, state machine, tracking", () => {
     const token = (await request(app).post("/api/identities/login").send({ organizationId: orgId, email, password: "pw123456" })).body.sessionToken;
 
     const res = await request(app).post("/api/orders/import").set("Authorization", `Bearer ${token}`).send({
-      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", productName: "Should Not Work", customerName: "Should Not Work Customer",
+      idempotencyKey: randomUUID(), orgPrefix: "ANILYA", artworkIntent: "blank", productName: "Should Not Work", customerName: "Should Not Work Customer",
     });
     expect(res.status).toBe(403);
   });

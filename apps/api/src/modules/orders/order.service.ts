@@ -30,6 +30,12 @@ export async function createOrder(
     organizationId: string; idempotencyKey: string; orgPrefix: string; productName: string;
     masterOrderId?: string; shippingAddress?: string; customerName: string; customerPhone?: string; customerEmail?: string;
     createdBy?: string;
+    // ART-001: decided ONCE, here, at import — never guessed later from
+    // whether a file happens to be present. 'attachment' = customer
+    // already provided a file to verify; 'no' = they said no, AMS must
+    // create one from scratch; 'blank' = artwork was never required at
+    // all for this order (Case 3 — must print freely, gated on nothing).
+    artworkIntent: "attachment" | "no" | "blank";
   }
 ): Promise<{ order: Order; wasNew: boolean }> {
   const client = await pool.connect();
@@ -60,6 +66,22 @@ export async function createOrder(
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
       [params.organizationId, customer.identity_id, params.idempotencyKey, params.masterOrderId ?? null, displayOrderNumber, params.productName, params.shippingAddress ?? null, params.createdBy ?? null]
     );
+
+    // ART-001/ART-003 derivation, right here at creation, once: a
+    // 'blank'-intent order gets requires_artwork = false and NO
+    // ams_stage at all — it must never enter the AMS workflow and must
+    // never be blocked waiting for a file that was never going to
+    // exist (a real bug this exact scenario caused once before — see
+    // ADR 0002). 'attachment' orders start at the Verifier stage
+    // (customer already gave AMS something to check); 'no' orders
+    // start at the Creator stage (AMS must build one from scratch).
+    const requiresArtwork = params.artworkIntent !== "blank";
+    const initialAmsStage = params.artworkIntent === "attachment" ? "artwork_verifier" : params.artworkIntent === "no" ? "artwork_creator" : null;
+    await client.query(
+      `INSERT INTO order_artwork (order_id, artwork_intent, requires_artwork, ams_stage) VALUES ($1, $2, $3, $4)`,
+      [rows[0]!.id, params.artworkIntent, requiresArtwork, initialAmsStage]
+    );
+
     await client.query("COMMIT");
     return { order: rows[0]!, wasNew: true };
   } catch (err) {
@@ -85,6 +107,14 @@ export async function listOrdersForCustomer(pool: pg.Pool, customerIdentityId: s
   return rows;
 }
 
+// The single most safety-critical check in this module (ADR 0002):
+// an order that requires artwork may not move into production until
+// the INTERNAL print-ready approval — never the customer's own
+// approval alone — has actually happened.
+export class ArtworkNotPrintReadyError extends Error {
+  constructor() { super("This order requires artwork and is not yet print-ready — customer approval alone is not sufficient"); this.name = "ArtworkNotPrintReadyError"; }
+}
+
 // The ONLY function that changes an order's stage — validates the
 // transition against the state machine before touching the row, so an
 // invalid jump (e.g. cancelling an already-completed order) fails
@@ -103,6 +133,18 @@ export async function transitionOrder(
     const order = rows[0];
 
     const nextStage = assertValidTransition(action, order.stage);
+
+    // The gate applies ONLY to 'start' (entering production) — never
+    // to 'confirm' (an order can be confirmed while artwork is still
+    // being worked out) and never to a 'blank'-intent order (see
+    // createOrder: requires_artwork is false for those, so this check
+    // passes trivially and they print freely, exactly as ADR 0002 requires).
+    if (action === "start") {
+      const { rows: artworkRows } = await client.query<{ requires_artwork: boolean; print_ready: boolean }>(
+        "SELECT requires_artwork, print_ready FROM order_artwork WHERE order_id = $1", [id]
+      );
+      if (artworkRows[0]?.requires_artwork && !artworkRows[0].print_ready) throw new ArtworkNotPrintReadyError();
+    }
 
     const { rows: updated } = await client.query<Order>(
       `UPDATE orders SET stage = $1, updated_at = now(),
