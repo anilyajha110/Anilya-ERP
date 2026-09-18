@@ -9,6 +9,7 @@ import { createHealthRouter } from "./shared/health.js";
 import { createIdentityRouter } from "./modules/identity/routes.js";
 import { createCrmRouter } from "./modules/crm/routes.js";
 import { ensureCustomerProfile } from "./modules/crm/customer.service.js";
+import { createOrdersRouter, createPublicTrackingRouter } from "./modules/orders/routes.js";
 
 // Exported as a factory (not "start the server as a side effect of
 // importing this file") specifically so tests can build a real app
@@ -38,6 +39,8 @@ export function buildApp(config: Config, pool: pg.Pool, logger: Logger): Express
     },
   }));
   app.use("/api", createCrmRouter(pool));
+  app.use("/api", createOrdersRouter(pool));
+  app.use(createPublicTrackingRouter(pool)); // deliberately NOT under /api or requireAuth — public tracking links
 
   // Structured error handler — every unhandled error becomes a
   // consistent JSON shape carrying the correlation id, never a stack

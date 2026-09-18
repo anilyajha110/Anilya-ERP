@@ -194,9 +194,64 @@ no preview, no dry-run, no safe rollback).
   first place
 - A staff identity is correctly rejected (403) from the customer-only self-service routes
 
-## Next: Phase 4
+## Phase 4 — Booking/Orders (done)
 
-Per the blueprint's own ordering: Booking/Orders — the core order
-lifecycle (import, the 14-stage state machine, cancellation), building
-on both Identity (who's acting) and CRM (which customer an order
-belongs to) now in place.
+The core order entity — scoped deliberately to Booking/Orders alone.
+Artwork, Production, and Logistics each get their own later phase and
+will extend the order lifecycle with their own stages, rather than
+this phase trying to anticipate all of them up front.
+
+### New endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| POST | /api/orders/import | Staff: idempotent order creation |
+| GET | /api/orders/:id | Staff: view an order |
+| POST | /api/orders/:id/:action | Staff: `confirm`/`start`/`complete`/`cancel` |
+| GET | /api/orders/me | Customer: their own orders, session-derived |
+| GET | /track/:token | **Public, no login** — the shareable tracking link |
+
+### The two things that mattered most this phase
+1. **Real idempotency** (fixes RISK-007 — the prototype's import was a
+   direct-write endpoint with no real retry contract). `idempotencyKey`
+   is a genuine, DB-enforced unique constraint per organization:
+   replaying the exact same import call — a webhook retry, a doubled
+   click — returns the SAME order every time, never creates a second
+   one. Verified live: the same key submitted twice produces one row in
+   the database, not two, and the second call returns 200 (not 201) with
+   the identical order id.
+2. **The public tracking link never leaks phone or email** (ORD-005).
+   `publicTrackingView()` doesn't select those columns into the response
+   shape at all — there's no field to accidentally forget to redact.
+   Verified live: an order created with a real phone number, then
+   tracked publicly, has that number nowhere in the response body,
+   confirmed by asserting the number's exact digits don't appear
+   anywhere in the JSON.
+
+### Learned from Phase 3, applied from the start this time
+The exact same routing-order mistake (`/orders/:id` swallowing a
+specific path) was avoided by registering `/orders/import` and
+`/orders/me` before the parameterized route, from the first draft —
+not found and fixed after the fact. **Zero bugs were found in this
+phase's own test run** — a good sign the earlier phases' lessons are
+compounding rather than repeating.
+
+### Verified live (44 tests total now pass, all against real Postgres, from a genuinely fresh `node_modules` + database)
+- Display order numbers (`ANILYA/2026/09/00001` format) never collide under back-to-back imports
+- A valid transition (`confirm`) succeeds and the audit log captures
+  the exact old→new stage
+- Completing an order that was never started is rejected (409), not
+  silently applied
+- Cancelling with no reason is rejected (400)
+- A completed order can never be cancelled — the state machine enforces this, not just UI discipline
+- Tracking a nonexistent token returns 404, not a leaked stack trace
+- A customer's `/orders/me` shows only orders actually linked to
+  their own identity — an order for a different customer by that name
+  doesn't appear
+- A staff identity without `orders.import` is rejected (403)
+
+## Next: Phase 5
+
+Per the blueprint's own module ordering: Artwork Management — the
+3-stage AMS approval sequence and the critical customer-approved-vs-
+print-ready distinction (ADR 0002), extending this phase's order
+lifecycle with artwork-specific stages.
