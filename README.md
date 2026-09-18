@@ -310,9 +310,45 @@ tests run once, not 98.
   approval (403) — the single most consequential action in this module
   has its own, narrower permission, not bundled into general write access
 
-## Next: Phase 6
+## Phase 6 — Gang Run (done)
 
-Per the blueprint's own module ordering: Gang Run and Production —
-combining multiple print-ready orders into shared print runs, building
-on this phase's print-ready gate as the entry prerequisite every
-member order must already satisfy individually before pooling.
+Combining multiple orders' printing into one shared physical run —
+scoped to just the pooling mechanism and its one non-negotiable rule.
+A full Job/Production engine (job lifecycle, escalation, vendor rates)
+is deliberately left for its own later phase.
+
+### New endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| POST | /api/gang-runs | Create an open Gang Run |
+| GET | /api/gang-runs/:id | View one |
+| GET | /api/gang-runs/:id/members | List pooled orders |
+| POST | /api/gang-runs/:id/members | Add an order — **the print-ready check happens here** |
+| POST | /api/gang-runs/:id/complete | Close it — members are never deleted |
+
+### The one rule that matters (ART-004/ART-005)
+An order may join a Gang Run **only** if Phase 5 already marked it
+individually print-ready. Gang Run combination is a third tier layered
+on top of that approval, never a substitute for it — enforced in
+exactly one function (`addOrderToGangRun`), so every write path funnels
+through the same check. Verified live, both directions: a non-print-
+ready order is rejected (409, naming the reason); a genuinely print-
+ready one succeeds. An order already pooled once can't join a second
+Gang Run, and completing a Gang Run never deletes its member history —
+the "Shadow ID" closes, but ART-005's audit trail stays fully queryable.
+
+### Verified live (59 tests total now pass, all against real Postgres, from a genuinely fresh `node_modules` + database)
+- An order with zero artwork approval cannot be pooled (409, "print-ready" named in the error)
+- A fully print-ready order can be pooled
+- Multiple print-ready orders can be pooled into the same run
+- An order already in one Gang Run is rejected from a second (409)
+- A completed Gang Run refuses new members (409) — its member list is frozen, not deleted
+- Member history survives after completion, fully queryable
+- A staff identity without `gangrun.manage` cannot create one (403)
+
+## Next: Phase 7
+
+Per the blueprint's own module ordering: the Job/Production engine —
+job lifecycle (Open→Assigned→InProgress→Completed), the 5-trigger
+Manager escalation, and vendor rate approval — deliberately deferred
+out of Phase 6 to keep Gang Run's own scope focused.
