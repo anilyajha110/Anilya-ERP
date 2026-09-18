@@ -403,9 +403,67 @@ Fixed by mounting the Jobs router before the Orders router.
   same "narrower permission for the more consequential action" pattern
   as Phase 5's print-approval
 
-## Next: Phase 8
+## Phase 8 — Vendor Rates & Operator Payment Ledger (done)
 
-Per the blueprint's own module ordering: Vendor Rates & the Artwork
-Operator Payment Ledger (JOB-005/006/007) — deliberately deferred out
-of Phase 7 to keep the core job engine's own scope focused, same
-discipline applied at every phase boundary so far.
+The two pieces deliberately deferred out of Phase 7 to keep the core
+job engine focused: rate quote approval, and the Artwork Operator
+payment ledger.
+
+### New endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| PUT | /api/vendor-rates/:category | Set the master reference rate — its own permission |
+| GET | /api/vendor-rates/:category | View it |
+| POST | /api/vendor-rates/quotes | A Partner submits a quote on a job |
+| GET | /api/vendor-rates/quotes/pending | The Manager approval queue |
+| POST | /api/vendor-rates/quotes/:id/approve / /reject | Manager-only decision |
+| POST | /api/operators/:id/ledger/payable | Record what AMS reports owed — idempotent on `externalReference` |
+| POST | /api/operators/:id/ledger/payment | Record an actual payout |
+| GET | /api/operators/:id/ledger | Full ledger + running balance |
+
+### The two rules that matter, both verified in both directions
+- **JOB-005/006**: a quote at or under the reference rate is
+  auto-accepted, no Manager involved at all; above it, it waits for
+  approval. **Approving a quote never moves the master rate itself** —
+  verified live by approving a quote at 5× the reference rate, then
+  confirming the master rate afterward is still exactly what it was
+  before. The rate compared against is snapshotted onto the quote at
+  submission time, so a later master-rate change never retroactively
+  changes what an already-decided quote's own record means.
+- **JOB-007**: the ERP does zero rate math on the Operator side — it
+  only ever records the exact final amount an external system (AMS)
+  reports. `externalReference` (AMS's own WORK_ID) is a genuine
+  idempotency key, the same principle as Orders' `idempotencyKey`
+  (Phase 4): replaying the same WORK_ID is a safe no-op, verified live
+  by posting the identical reference twice and confirming the
+  operator's balance moved exactly once, not twice.
+
+### A real bug found by the tests, not assumed away
+`operator_ledger` uses a `BIGINT` primary key (same as `customer_ledger`,
+Phase 3), but `audit_log.entity_id` is a `UUID` column — passing the
+ledger row's own numeric id straight into `logActivity()` crashed with
+a genuine Postgres type error the moment a real payable was posted.
+Fixed by logging the *operator's* identity id (a real UUID, and the
+semantically correct thing to reference anyway) instead, with the
+ledger row's own id kept in the remarks text.
+
+### Verified live (83 tests total now pass, all against real Postgres, from a genuinely fresh `node_modules` + database)
+- A quote exactly at the reference rate is auto-accepted
+- A quote under the reference rate is auto-accepted
+- A quote over the reference rate is correctly left `pending_approval`
+- Approving an already-decided quote a second time is rejected (409)
+- `operator_ledger` is genuinely immutable — a direct `UPDATE`/`DELETE`
+  attempted straight against the table (not through the API) is
+  rejected by Postgres itself
+- Ordinary staff (can submit quotes, but lack
+  `vendorrates.quote.approve`) cannot approve one (403); staff without
+  the separate `vendorrates.master.manage` cannot touch the master
+  rate at all (403)
+
+## Next: Phase 9
+
+Per the blueprint's own module ordering: Finance & Invoicing —
+invoice generation gated strictly on Delivered (mirroring the same
+"hard gate checked at multiple independent points" discipline as
+Phase 5's print-ready check), and the Customer Ledger's own
+counterpart to this phase's Operator Ledger.
