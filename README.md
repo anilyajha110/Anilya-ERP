@@ -93,11 +93,110 @@ lockfile regeneration after a clean-reinstall verification) is already
 included in this zip, so `git log` on your end will show the real
 build history, not a single squashed dump.
 
-## Next: Phase 2
+## Phase 2 — Identity, RBAC, and Unified Audit (done)
 
-Organization/Identity/RBAC/Audit, per `docs/PHASE_0_AUDIT_REPORT.md` §6
-and the blueprint's own phase ordering. Do not begin Phase 2 schema work
-until the two SECURITY BLOCKER items in `docs/architecture/RISK_REGISTER.md`
-(client-trusted role claims; open file-access stub) are designed out of
-the new auth module from the start — not ported from the prototype, then
-patched later, as happened previously.
+Organizations, a unified `identities` table (one shape for Staff/
+Partner/Customer instead of the prototype's three inconsistent ones),
+relational RBAC, hashed sessions, centralized OTP, and ONE audit log —
+made genuinely immutable by a Postgres trigger, not by "no code path
+happens to touch it."
+
+**The one rule most worth knowing:** `requireAuth`/`requirePermission`
+(`apps/api/src/modules/identity/rbac.ts`) derive who's making a request
+**only** from a verified session token. Nothing anywhere accepts a role
+or identity claim from the request body — this is the direct fix for
+the prototype's most serious finding (RISK-003), and there's a
+dedicated test (`identity.test.ts`) that sends a fake `actorRole` claim
+with no valid session and confirms it's fully ignored (401).
+
+### New endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| POST | /api/identities/register | Create an identity (Staff/Partner/Customer) within an organization |
+| POST | /api/identities/login | Password login → session token |
+| POST | /api/identities/logout | Revokes the session |
+| GET | /api/identities/me | Returns the identity the SERVER believes is authenticated — proof the session-derivation works |
+
+### Verified live (21 tests total now pass, all against real Postgres)
+- Same email allowed in two different organizations; rejected as a duplicate within the same one (multi-tenant isolation, genuinely tested)
+- `UPDATE`/`DELETE` against `audit_log` both fail with a database-level error — tried directly via `psql`, not just "no route exists"
+- A permission-gated test route: identity without the permission → 403; with it → 200
+- The exact RISK-003 attack pattern (claiming `actorRole: "Super Admin"` in the body, no real session) → 401
+- Logout immediately invalidates the same token
+- **A genuine regression was found and fixed during this phase**: an existing Phase 1 test asserted the `down` migration always reverses `app_health` specifically — true only when that was the *latest* migration. Adding migrations 0002–0007 broke that assumption; the test now checks whichever migration is actually most recent instead of a hardcoded name.
+
+### Still not done (by design — later phases)
+- No UI for any of this yet (Phase 2 is the API + data layer only)
+- Default roles/permissions are not seeded yet — you create them yourself in each organization for now
+- The Customer/Partner OTP login flow (as opposed to Staff password login) isn't wired to a route yet — the `otp_requests`/`otp_channel_deliveries` tables and hashing exist, but no `/login/otp` endpoint calls them yet
+- File-access control (the prototype's other SECURITY BLOCKER) is not part of Identity — it'll be addressed when the Files module is built
+
+## Phase 3 — Customer/CRM (done)
+
+Customer profiles (extending Identity's `customer` type with the
+structured billing chain), an append-only ledger with the running-
+balance math enforced by a real database CHECK constraint, and a full
+import preview/commit/rollback system — directly closing a gap the
+Phase 0 audit flagged as missing entirely in the prototype (CRM-004:
+no preview, no dry-run, no safe rollback).
+
+### New endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| POST | /api/customers | Staff: find-or-create by phone→email→dummy (CRM-001) |
+| GET | /api/customers/:id | Staff: view a customer's profile + billing |
+| PATCH | /api/customers/:id/billing | Staff: update the GSTIN/address chain (CRM-002) |
+| GET | /api/customers/:id/ledger | Staff: full ledger + running balance |
+| POST | /api/customers/:id/ledger/adjustment | Staff: the only sanctioned correction — a new row, never an edit |
+| POST | /api/customers/import/preview | Staff: see what an import WOULD do, writes nothing |
+| POST | /api/customers/import/commit | Staff: actually run it, tracked as a batch |
+| POST | /api/customers/import/:batchId/rollback | Staff: undo — deletes only what THIS batch created |
+| GET | /api/customers/me | Customer: their own profile, derived only from their session |
+| GET | /api/customers/me/ledger | Customer: their own ledger, same rule |
+
+### Three genuine bugs found and fixed this phase
+1. **Route-ordering bug** (same class as one already fixed in the
+   Inventory module during the original prototype build): `/customers/:id`
+   was registered before `/customers/me`, so Express matched "me" as an
+   `:id` value and ran the wrong permission check entirely. Fixed by
+   reordering — the specific route must come before the parameterized one.
+2. **Rollback crashed on a real foreign-key violation**: deleting a
+   customer an import batch had created failed because
+   `import_batch_entries` still pointed at it. Fixed the foreign key to
+   `ON DELETE SET NULL` — the audit record of what happened survives,
+   only the now-dangling reference clears.
+3. **A self-registered customer had no profile row at all**: the
+   CRM module's own `findOrCreateCustomer` correctly created a
+   `customer_profiles` row alongside the identity, but a customer
+   signing up through Identity's generic `/identities/register`
+   endpoint didn't get one — `/customers/me` returned null forever, a
+   real production bug had this shipped as-is. Fixed with a small hook
+   Identity exposes (`onIdentityCreated`) that CRM wires up, so Identity
+   stays generic (it still has no idea what a `customer_profiles` row
+   is) while every customer, however they're created, ends up correctly
+   set up.
+
+### Verified live (33 tests total now pass, all against real Postgres, from a genuinely fresh `node_modules` + database)
+- Phone match takes priority over email; a customer found by either
+  is never duplicated
+- A customer with neither phone nor email is created as `dummy`, not silently rejected
+- Concurrent-safe ledger posting (`SELECT ... FOR UPDATE` row lock — two
+  simultaneous postings can't both read the same stale "previous
+  balance")
+- Import preview writes nothing — running it twice shows identical results
+- Import commit correctly separates newly-created customers from matched existing ones in the same batch
+- Rollback removes only what the batch itself created — a customer
+  that already existed before the import is never touched, verified directly
+- Rolling back the same batch twice is rejected (409), not silently repeated
+- A staff identity without `customers.write` cannot create a customer (403)
+- A customer sees exactly their own profile via `/me` — never another
+  customer's, and there's no `:id` in that URL to manipulate in the
+  first place
+- A staff identity is correctly rejected (403) from the customer-only self-service routes
+
+## Next: Phase 4
+
+Per the blueprint's own ordering: Booking/Orders — the core order
+lifecycle (import, the 14-stage state machine, cancellation), building
+on both Identity (who's acting) and CRM (which customer an order
+belongs to) now in place.

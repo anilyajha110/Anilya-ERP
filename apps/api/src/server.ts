@@ -7,6 +7,8 @@ import { createLogger, type Logger } from "./shared/logger.js";
 import { correlationIdMiddleware } from "./shared/correlation-id.js";
 import { createHealthRouter } from "./shared/health.js";
 import { createIdentityRouter } from "./modules/identity/routes.js";
+import { createCrmRouter } from "./modules/crm/routes.js";
+import { ensureCustomerProfile } from "./modules/crm/customer.service.js";
 
 // Exported as a factory (not "start the server as a side effect of
 // importing this file") specifically so tests can build a real app
@@ -30,7 +32,12 @@ export function buildApp(config: Config, pool: pg.Pool, logger: Logger): Express
   app.use(express.json({ limit: "1mb" }));
 
   app.use(createHealthRouter(pool));
-  app.use("/api", createIdentityRouter(pool));
+  app.use("/api", createIdentityRouter(pool, {
+    onIdentityCreated: async (identity) => {
+      if (identity.identityType === "customer") await ensureCustomerProfile(pool, identity.id);
+    },
+  }));
+  app.use("/api", createCrmRouter(pool));
 
   // Structured error handler — every unhandled error becomes a
   // consistent JSON shape carrying the correlation id, never a stack

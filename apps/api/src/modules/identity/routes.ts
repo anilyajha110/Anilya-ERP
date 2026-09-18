@@ -10,7 +10,7 @@ function getIp(req: Request): string {
   return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
 }
 
-export function createIdentityRouter(pool: pg.Pool): Router {
+export function createIdentityRouter(pool: pg.Pool, hooks?: { onIdentityCreated?: (identity: { id: string; organizationId: string; identityType: string }) => Promise<void> }): Router {
   const router = Router();
 
   router.post("/identities/register", async (req: Request, res: Response) => {
@@ -20,6 +20,14 @@ export function createIdentityRouter(pool: pg.Pool): Router {
     }
     try {
       const identity = await registerIdentity(pool, { organizationId, identityType, displayName, email, phone, password });
+      // Identity stays generic — it has no idea what a customer_profiles
+      // row is. But every identity_type has follow-up setup ONLY that
+      // domain understands, so a hook lets the composing module (CRM,
+      // here) wire that in without Identity depending on CRM. Found live:
+      // without this, a self-registered customer (as opposed to one
+      // created via the CRM module's own findOrCreateCustomer) had no
+      // profile row at all — /customers/me returned null forever.
+      if (hooks?.onIdentityCreated) await hooks.onIdentityCreated({ id: identity.id, organizationId, identityType });
       await logActivity(pool, {
         organizationId, actorIdentityId: identity.id, actionType: "identity.registered",
         entityType: "identity", entityId: identity.id, ipAddress: getIp(req),
