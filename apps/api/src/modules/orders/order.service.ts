@@ -115,6 +115,16 @@ export class ArtworkNotPrintReadyError extends Error {
   constructor() { super("This order requires artwork and is not yet print-ready — customer approval alone is not sufficient"); this.name = "ArtworkNotPrintReadyError"; }
 }
 
+// JOB-002: exposes exactly which jobs are blocking completion, not
+// just a bare refusal — the caller (and the person reading the error)
+// can act on this directly.
+export class IncompleteJobsError extends Error {
+  constructor(public readonly pendingJobs: { id: string; description: string; status: string }[]) {
+    super(`Cannot complete this order — ${pendingJobs.length} job(s) are not yet completed: ${pendingJobs.map((j) => `${j.description} (${j.status})`).join(", ")}`);
+    this.name = "IncompleteJobsError";
+  }
+}
+
 // The ONLY function that changes an order's stage — validates the
 // transition against the state machine before touching the row, so an
 // invalid jump (e.g. cancelling an already-completed order) fails
@@ -144,6 +154,16 @@ export async function transitionOrder(
         "SELECT requires_artwork, print_ready FROM order_artwork WHERE order_id = $1", [id]
       );
       if (artworkRows[0]?.requires_artwork && !artworkRows[0].print_ready) throw new ArtworkNotPrintReadyError();
+    }
+
+    // JOB-002: an order may not complete while any of its own jobs are
+    // still open/assigned/in_progress. Named, not just refused — the
+    // caller gets back exactly which jobs are still blocking.
+    if (action === "complete") {
+      const { rows: incompleteJobs } = await client.query<{ id: string; description: string; status: string }>(
+        "SELECT id, description, status FROM jobs WHERE order_id = $1 AND status NOT IN ('completed', 'cancelled')", [id]
+      );
+      if (incompleteJobs.length > 0) throw new IncompleteJobsError(incompleteJobs);
     }
 
     const { rows: updated } = await client.query<Order>(

@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS job_escalations;
+DROP TABLE IF EXISTS jobs;

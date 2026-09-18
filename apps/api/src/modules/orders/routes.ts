@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import type pg from "pg";
 import { requireAuth, requirePermission } from "../identity/rbac.js";
-import { createOrder, getOrderById, getOrderByTrackingToken, listOrdersForCustomer, transitionOrder, ArtworkNotPrintReadyError, type Order } from "./order.service.js";
+import { createOrder, getOrderById, getOrderByTrackingToken, listOrdersForCustomer, transitionOrder, ArtworkNotPrintReadyError, IncompleteJobsError, type Order } from "./order.service.js";
 import { InvalidTransitionError } from "./state-machine.js";
 import { logActivity } from "../identity/audit.service.js";
 
@@ -86,7 +86,7 @@ export function createOrdersRouter(pool: pg.Pool): Router {
       });
       res.json(order);
     } catch (err) {
-      if (err instanceof InvalidTransitionError || err instanceof ArtworkNotPrintReadyError) return res.status(409).json({ error: err.message });
+      if (err instanceof InvalidTransitionError || err instanceof ArtworkNotPrintReadyError || err instanceof IncompleteJobsError) return res.status(409).json({ error: err.message });
       throw err;
     }
   });

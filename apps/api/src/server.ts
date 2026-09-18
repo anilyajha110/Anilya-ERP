@@ -11,6 +11,7 @@ import { createCrmRouter } from "./modules/crm/routes.js";
 import { ensureCustomerProfile } from "./modules/crm/customer.service.js";
 import { createOrdersRouter, createPublicTrackingRouter } from "./modules/orders/routes.js";
 import { createArtworkRouter } from "./modules/artwork/routes.js";
+import { createJobsRouter } from "./modules/jobs/routes.js";
 import { createGangRunRouter } from "./modules/gang-run/routes.js";
 
 // Exported as a factory (not "start the server as a side effect of
@@ -41,6 +42,12 @@ export function buildApp(config: Config, pool: pg.Pool, logger: Logger): Express
     },
   }));
   app.use("/api", createCrmRouter(pool));
+  // Jobs mounted BEFORE Orders: /orders/:orderId/jobs is a specific
+  // path, but Orders' own generic /orders/:id/:action would otherwise
+  // greedily match it first (treating "jobs" as the :action) since
+  // Express matches across mounted routers in mount order, not just
+  // within one router — found live by the jobs test suite itself.
+  app.use("/api", createJobsRouter(pool));
   app.use("/api", createOrdersRouter(pool));
   app.use("/api", createArtworkRouter(pool));
   app.use("/api", createGangRunRouter(pool));

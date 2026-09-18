@@ -346,9 +346,66 @@ the "Shadow ID" closes, but ART-005's audit trail stays fully queryable.
 - Member history survives after completion, fully queryable
 - A staff identity without `gangrun.manage` cannot create one (403)
 
-## Next: Phase 7
+## Phase 7 — Job / Production Engine (done)
 
-Per the blueprint's own module ordering: the Job/Production engine —
-job lifecycle (Open→Assigned→InProgress→Completed), the 5-trigger
-Manager escalation, and vendor rate approval — deliberately deferred
-out of Phase 6 to keep Gang Run's own scope focused.
+The core unit of production work against an order — job lifecycle,
+escalation, and the two rules with real teeth (JOB-002, JOB-004).
+Vendor rate approval (JOB-005/006) and the Artwork Operator payment
+ledger (JOB-007) are deliberately deferred to their own later phase —
+same discipline as splitting Gang Run out of "Production" in Phase 6.
+
+### New endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| POST | /api/orders/:orderId/jobs | Create a job on an order |
+| GET | /api/orders/:orderId/jobs | List an order's jobs |
+| GET | /api/jobs/:id | View one job |
+| POST | /api/jobs/:id/assign | Assign to a Partner — **JOB-004 checked here** |
+| POST | /api/jobs/:id/start / /complete | Job lifecycle |
+| POST | /api/jobs/:id/escalate | Raise one of 5 named triggers |
+| POST | /api/jobs/:id/escalate/resolve | Manager-only, its own permission |
+| GET | /api/escalations | The open queue |
+
+### The two rules that matter, both verified in both directions
+- **JOB-004**: a Partner who has never logged in cannot receive a
+  direct job assignment. Checked live against `sessions` (Phase 2),
+  never a stored flag that could drift stale — a Partner's actual login
+  history is always the current truth. Verified live: a never-logged-in
+  Partner rejected (409, naming the reason); a genuinely logged-in one
+  succeeds.
+- **JOB-002**: an order cannot complete while any of its own jobs are
+  still open. Wired into `transitionOrder`'s existing `complete` action
+  (the same function Phase 5's print-ready gate uses) — the error names
+  exactly which job(s) are still blocking, not just a bare refusal.
+  Verified live: an order with one incomplete job rejected (409,
+  naming it by description); the same order, once that job completes,
+  succeeds. An order with **no jobs at all** completes freely — the
+  gate only blocks on jobs that actually exist.
+
+### A real cross-router bug found live, not assumed away
+`POST /orders/:orderId/jobs` was silently being swallowed by the
+Orders router's own generic `/orders/:id/:action` route — Express
+matches across separately-mounted routers in **mount order**, not just
+within one router, and Orders was mounted first, so it greedily
+matched `.../jobs` as `:action = "jobs"` before the Jobs router ever
+got a chance. The exact same class of bug already found once within a
+single router (`/customers/me` vs `/customers/:id`, Phase 3) —
+this time it crossed a module boundary, a genuinely new variant.
+Fixed by mounting the Jobs router before the Orders router.
+
+### Verified live (70 tests total now pass, all against real Postgres, from a genuinely fresh `node_modules` + database)
+- Full job lifecycle: open → assigned → in_progress → completed
+- Starting a job that was never assigned is rejected (409)
+- A job can't be escalated twice while the first escalation is still open (409)
+- Resolving an escalation removes it from the open queue immediately
+- Ordinary staff (`jobs.manage` but not the separate
+  `jobs.escalations.manage`) cannot resolve an escalation (403) — the
+  same "narrower permission for the more consequential action" pattern
+  as Phase 5's print-approval
+
+## Next: Phase 8
+
+Per the blueprint's own module ordering: Vendor Rates & the Artwork
+Operator Payment Ledger (JOB-005/006/007) — deliberately deferred out
+of Phase 7 to keep the core job engine's own scope focused, same
+discipline applied at every phase boundary so far.
