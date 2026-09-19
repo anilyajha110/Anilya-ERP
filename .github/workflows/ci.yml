@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [master]
 
 jobs:
   quality-gate:
@@ -57,12 +57,18 @@ jobs:
       - name: Build (every workspace)
         run: npm run build
 
-      # Placeholders for gates the blueprint requires that need tooling
-      # decisions beyond Phase 1's scope (dependency/secret scanning,
-      # SBOM generation) — left as explicit, visible TODOs rather than
-      # silently absent, per this project's own "no undocumented gap" rule.
-      - name: Dependency & secret scan (TODO — Phase 1 backlog item)
-        run: echo "TODO: wire in npm audit / a secret-scanning action before this gate is trusted"
+      - name: Dependency vulnerability scan
+        run: npm run audit
 
-      - name: SBOM generation (TODO — Phase 1 backlog item)
-        run: echo "TODO: generate and publish an SBOM as a release artifact"
+      - name: Secret scan
+        run: npm run secrets:scan
+
+      - name: Generate SBOM
+        run: npm run sbom
+
+      - name: Upload SBOM as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+          retention-days: 90

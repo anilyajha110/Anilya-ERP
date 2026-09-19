@@ -803,9 +803,61 @@ actual behavior rather than just its configuration.
 - An error response (an invalid Bearer token) contains no stack trace,
   no server file paths, no `node_modules` references
 
-## Next: Phase 15
+## Phase 15 — Dependency/Secret Scanning & SBOM (done)
 
-The CI workflow (`.github/workflows/ci.yml`) has carried two explicit
-TODO placeholders since Phase 1 — dependency/secret scanning and SBOM
-generation — the last two items from the blueprint's own supply-chain
-baseline that haven't been wired in for real yet.
+Closes the two CI placeholders that have sat as explicit TODOs since
+Phase 1. Everything below runs for real, in this sandbox — deliberately
+avoiding third-party GitHub Actions whose actual behavior can only be
+verified on GitHub's own infrastructure, not here, wherever an
+equally-effective local, testable alternative existed.
+
+### A real bug found while opening this file for the first time
+The CI workflow has triggered on `push: branches: [main]` since Phase
+1 — but every single push in this project's real history has gone to
+`master` (confirmed directly: `git branch --show-current`). **The
+push-based CI trigger has never once actually fired for this
+project.** Pull-request-triggered runs were unaffected (no branch
+restriction on that trigger), but a direct push straight to `master`
+— exactly the `git push --force` pattern used after every phase so far
+— never once ran CI. Fixed by correcting the branch name.
+
+### What's now real, not a TODO
+- **`npm run audit`** (`npm audit --audit-level=high`) — the same tool
+  that already caught a real critical vulnerability once before, in
+  Phase 1, now a permanent CI gate instead of a one-off manual check.
+- **`npm run secrets:scan`** — a genuine, from-scratch scanner
+  (`scripts/secret-scan.js`), not a reference to an external action
+  whose real behavior can't be verified here. Checks every
+  git-tracked file for AWS keys, GitHub tokens, private key headers,
+  Slack tokens, and generic high-entropy secret assignments.
+- **`npm run sbom`** (`@cyclonedx/cyclonedx-npm`) — generates a real
+  CycloneDX 1.6 Software Bill of Materials, uploaded as a CI build
+  artifact (90-day retention) on every run.
+
+### The secret scanner, genuinely tested both directions
+Running it against this actual codebase for the first time immediately
+found something real: a false positive in `identity.test.ts`, flagging
+the well-known "correct-horse-battery-staple" test fixture password as
+a high-entropy secret. That's exactly the kind of tuning a real
+scanner needs — fixed by excluding `*.test.ts`/`*.spec.ts` from that
+one pattern (application, migration, and config code are never
+exempted, only test fixtures). Then verified the *other* direction:
+planted a real fake AWS key (`AKIAIOSFODNN7EXAMPLE`) directly in a
+genuine source file, confirmed the scanner caught it immediately, then
+removed it and confirmed a clean scan again — proof this tool actually
+works, not just that it never happens to fire.
+
+### Verified live
+- `npm run audit`, `npm run secrets:scan`, and `npm run sbom` each run
+  individually and pass against the real, current codebase (0
+  vulnerabilities, 0 secret findings across 113 tracked files, a real
+  393-component SBOM)
+- The complete `npm run verify` chain — now including both new gates —
+  still passes end to end from a genuinely fresh `node_modules` and database
+
+## Next: Phase 16
+
+Per the blueprint's own module list, Reporting has not been touched at
+all yet — every other phase has been either a workflow (Orders,
+Complaints) or a ledger (Customer, Operator, Inventory); Phase 16 would
+be the first that reads *across* them rather than adding new business logic.

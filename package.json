@@ -15,9 +15,13 @@
     "db:migrate": "npm run migrate --workspace=packages/database",
     "db:migrate:down": "npm run migrate:down --workspace=packages/database",
     "db:seed": "npm run seed --workspace=packages/database",
-    "verify": "npm run typecheck && npm run lint && npm run db:migrate && npm run test && npm run build"
+    "audit": "npm audit --audit-level=high",
+    "secrets:scan": "node scripts/secret-scan.js",
+    "sbom": "cyclonedx-npm --output-file sbom.json",
+    "verify": "npm run typecheck && npm run lint && npm run audit && npm run secrets:scan && npm run db:migrate && npm run test && npm run build"
   },
   "devDependencies": {
+    "@cyclonedx/cyclonedx-npm": "^6.0.1",
     "@types/node": "^22.9.0",
     "@typescript-eslint/eslint-plugin": "^8.13.0",
     "@typescript-eslint/parser": "^8.13.0",
