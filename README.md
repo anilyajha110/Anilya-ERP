@@ -646,9 +646,70 @@ clicking the same action directly.
   unchanged
 - A staff identity without `logistics.manage` cannot create a parcel (403)
 
-## Next: Phase 12
+## Phase 12 — Inventory (done)
 
-Per the blueprint's own module ordering: Inventory — product identity,
-warehouse-scoped stock, and concurrency-safe reservations, kept as its
-own isolated module (mirroring the original prototype's own Inventory
-Phase 1 scoping) rather than woven into the core Orders/Jobs tables.
+Product identity, warehouses, and concurrency-safe stock reservation —
+kept as its own isolated module, deliberately scoped tight to the
+safety-critical core (INV-001–004, and a real fix for INV-008). The
+Outbox/dead-letter retry infrastructure (INV-005), the full
+Zone/City/Godown RBAC hierarchy (INV-006), bulk supplier mapping
+(INV-007), and PO/GRN/Transfer/Consignment/Batch/Cycle-Count (INV-009)
+are all deliberately deferred to their own later phase.
+
+### New endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| POST | /api/inventory/products | Create |
+| POST | /api/inventory/products/:id/map-external | INV-001 external-ID mapping |
+| POST | /api/inventory/warehouses | Create |
+| POST | /api/inventory/warehouses/:id/set-default | Exactly one default per org |
+| POST | /api/inventory/events | INV-002, idempotent stock receipt |
+| POST | /api/inventory/reservations | **INV-003, the concurrency-critical one** |
+| POST | /api/inventory/reservations/:id/release / /consume | Resolve a reservation |
+| GET | /api/inventory/stock / /ledger | Query on-hand/reserved/available, full movement history |
+
+### INV-008 — a real fix, not just a note
+The Phase 0 audit's own words on the prototype: warehouse resolution
+"falls back to the first warehouse in the table... explicitly flagged
+as a placeholder." Fixed here with an actual decision: at most one
+warehouse per organization may be marked default (a database-level
+partial unique index, not just application discipline), and resolving
+with no explicit warehouse either uses that real configured default or
+throws loudly — never silently guesses.
+
+### INV-003 — proven under REAL concurrent load, not simulated
+This is the one property in the whole project most worth getting
+right, and the one most likely to look correct in sequential testing
+while still being broken. So it was tested for real: 10 units on hand,
+**5 genuinely parallel** reservation requests (`Promise.all`, not
+sequential `await`s) for 3 units each — 15 units of demand against 10
+of supply. Exactly 3 succeeded, exactly 2 were rejected (409,
+`InsufficientStockError`), final `reserved` was exactly 9, `available`
+exactly 1 — never negative, never over-committed. The row lock
+(`FOR UPDATE`) inside `reserveStock()` is what makes this true; the
+database's own `reserved <= on_hand` CHECK constraint (migration 0020)
+is the backstop if that logic were ever wrong.
+
+### INV-002 and INV-004, also verified live
+- Replaying the identical inbound event twice credited stock **exactly
+  once** — checked by reading the actual `on_hand` value, not just
+  trusting the response codes (201 then 200).
+- Every stock movement's ledger row records the real
+  `previous_on_hand`/`new_on_hand` snapshot — checked directly against
+  a fresh product with a single inbound movement (0 → 15).
+- Releasing a reservation frees `reserved` but leaves `on_hand`
+  completely untouched; consuming one reduces both together — the
+  difference between "no longer holding this" and "this physically left."
+
+### Verified live (119 tests total now pass, all against real Postgres, from a genuinely fresh `node_modules` + database)
+- A reservation with no explicit warehouse resolves to the
+  organization's real configured default
+- Consuming an already-consumed reservation a second time is rejected (409)
+- A staff identity without `inventory.reserve` cannot create a
+  reservation (403)
+
+## Next: Phase 13
+
+Per the blueprint's own module ordering: Notifications — the
+type × recipient → channel routing matrix (LOG-003), where a later
+rule change never retroactively rewrites what already happened.

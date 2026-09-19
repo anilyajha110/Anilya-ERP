@@ -17,6 +17,7 @@ import { createOperatorLedgerRouter } from "./modules/operator-ledger/routes.js"
 import { createFinanceRouter } from "./modules/finance/routes.js";
 import { createComplaintsRouter } from "./modules/complaints/routes.js";
 import { createLogisticsRouter } from "./modules/logistics/routes.js";
+import { createInventoryRouter } from "./modules/inventory/routes.js";
 import { createGangRunRouter } from "./modules/gang-run/routes.js";
 
 // Exported as a factory (not "start the server as a side effect of
@@ -61,6 +62,7 @@ export function buildApp(config: Config, pool: pg.Pool, logger: Logger): Express
   app.use("/api", createFinanceRouter(pool));
   app.use("/api", createComplaintsRouter(pool));
   app.use("/api", createLogisticsRouter(pool));
+  app.use("/api", createInventoryRouter(pool));
   app.use("/api", createOrdersRouter(pool));
   app.use("/api", createArtworkRouter(pool));
   app.use("/api", createGangRunRouter(pool));
