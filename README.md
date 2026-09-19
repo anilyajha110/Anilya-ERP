@@ -708,8 +708,53 @@ is the backstop if that logic were ever wrong.
 - A staff identity without `inventory.reserve` cannot create a
   reservation (403)
 
-## Next: Phase 13
+## Phase 13 — Notifications (done)
 
-Per the blueprint's own module ordering: Notifications — the
-type × recipient → channel routing matrix (LOG-003), where a later
-rule change never retroactively rewrites what already happened.
+The type × recipient-role → channel routing matrix (LOG-003), with the
+one rule that makes it trustworthy as a historical record: changing a
+rule tomorrow never rewrites what a notification already did yesterday.
+
+### New endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| POST | /api/notifications/types | Define a notification type |
+| PUT / DELETE | /api/notifications/routing-rules | Set/deactivate one (type, role, channel) cell in the matrix |
+| POST | /api/notifications/send | Resolve current rules, **freeze the result**, fan out per channel |
+| GET | /api/notifications/me | A recipient's own notifications |
+| GET | /api/notifications/:id | View one (staff) |
+
+### LOG-003 — proven by actually changing a rule mid-test, not just asserted
+`notify()` resolves the routing matrix at the moment it's called, then
+writes the result onto `notifications.channels_snapshot` — the
+notification never holds a live reference back to the rule (the same
+"snapshot, don't live-reference" principle as Phase 8's
+`reference_rate_at_quote`). Verified live: sent a notification while
+the rule was `[sms, email]`, then genuinely changed the rule to
+`[whatsapp]` only, then sent a second notification — the second one
+correctly shows `[whatsapp]`, and re-fetching the **first** notification
+afterward still shows exactly `[sms, email]`, completely untouched by
+the change that happened after it existed.
+
+### Also genuinely immutable, not just by convention
+`notifications` is append-only via the same trigger-enforced pattern
+as every other history-bearing table in this project — a direct
+`UPDATE`/`DELETE` attempted straight against the table (not through
+the API) was tried and rejected by Postgres itself.
+
+### Verified live (125 tests total now pass, all against real Postgres, from a genuinely fresh `node_modules` + database)
+- Sending with no routing rule configured for that (type, role) is
+  rejected (409) — nothing silently goes nowhere
+- Multiple channels for one (type, role) all land in the snapshot and
+  each gets its own delivery row (the same fan-out pattern as OTP
+  since Phase 2)
+- A staff identity without `notifications.send` cannot send one (403)
+
+## Next: Phase 14
+
+With the core business modules now substantially complete (Identity
+through Notifications), Phase 14 turns to closing out the remaining
+SECURITY BLOCKER items from the Phase 0 Risk Register itself — CORS
+default-open until explicitly configured (RISK-011), and a genuine
+automated security regression suite (RISK-010) that re-verifies every
+"tested live" security property in this README on every single run,
+not just once when each phase was first built.
