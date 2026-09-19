@@ -8,14 +8,26 @@
 // production work is done, which is NOT the same real-world fact as
 // the customer having actually received the order. Invoicing (FIN-001)
 // is gated on 'delivered' specifically, never 'completed'.
-export const ORDER_STAGES = ["imported", "confirmed", "in_progress", "completed", "delivered", "cancelled"] as const;
+//
+// 'dispatched'/'out_for_delivery' added in Phase 11 (0019_parcels) —
+// real granularity for the logistics journey, driven by Parcel
+// cascading (parcel.service.ts). Both paths stay valid: a small order
+// can still go straight 'completed' -> 'delivered' (in-person pickup,
+// no parcel tracking needed); a parcelled order goes through the full journey.
+export const ORDER_STAGES = ["imported", "confirmed", "in_progress", "completed", "dispatched", "out_for_delivery", "delivered", "cancelled"] as const;
 export type OrderStage = (typeof ORDER_STAGES)[number];
 
 export const ORDER_TRANSITIONS: Record<string, { from: OrderStage[]; to: OrderStage }> = {
   confirm: { from: ["imported"], to: "confirmed" },
   start: { from: ["confirmed"], to: "in_progress" },
   complete: { from: ["in_progress"], to: "completed" },
-  deliver: { from: ["completed"], to: "delivered" },
+  dispatch: { from: ["completed"], to: "dispatched" },
+  outForDelivery: { from: ["dispatched"], to: "out_for_delivery" },
+  // 'deliver' accepts EITHER a direct pickup (straight from
+  // 'completed') OR the end of the full logistics journey (from
+  // 'out_for_delivery') — genuinely two different real workflows,
+  // both valid, neither one replacing the other.
+  deliver: { from: ["completed", "out_for_delivery"], to: "delivered" },
   // Cancellation is reachable from any stage BEFORE completion — never
   // after. A completed (or delivered) order is done; "cancelling" it is
   // a different real-world action (a refund/complaint), not an

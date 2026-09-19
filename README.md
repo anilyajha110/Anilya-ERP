@@ -593,9 +593,62 @@ test's own setup.
   anything touches the ledger
 - Resolving an already-resolved ticket a second time is rejected (409)
 
-## Next: Phase 11
+## Phase 11 — Logistics (done)
 
-Per the blueprint's own module ordering: Logistics — parcel bundling
-for dispatch and real Dispatched/Out-for-Delivery granularity between
-`completed` and `delivered`, which Phase 9 deliberately left as a
-single direct transition for Finance's own purposes.
+Parcel bundling for dispatch, giving the order lifecycle real
+`dispatched`/`out_for_delivery` granularity between `completed` and
+`delivered` — while keeping the direct path Phase 9 built working
+unchanged for orders that don't go through a parcel at all.
+
+### New endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| POST | /api/parcels | Create one |
+| GET | /api/parcels/:id | View it + its member orders |
+| POST | /api/parcels/:id/orders | Add a `completed` order to it |
+| DELETE | /api/parcels/orders/:orderId | **Split** — proceeds independently from here on |
+| POST | /api/parcels/:id/dispatch | Cascades `dispatched` to every member |
+| POST | /api/parcels/:id/out-for-delivery | Cascades `out_for_delivery` |
+| POST | /api/parcels/:id/deliver | Cascades `delivered` |
+
+Individual order dispatch/delivery (no parcel involved) needed **no
+new route at all** — extending the shared state machine
+(`state-machine.ts`) meant the existing generic
+`/orders/:id/:action` from Phase 4 already handles `dispatch`,
+`outForDelivery`, and the expanded `deliver` automatically.
+
+### LOG-001 and LOG-002, both verified with real cascading data
+- **Cascade**: dispatching a parcel with two member orders moves
+  *both* to `dispatched` — checked by fetching each order
+  independently afterward, not just trusting the parcel's own status.
+  The full chain (dispatch → out-for-delivery → deliver) carries a
+  member all the way to `delivered`.
+- **Split isolation**: an order removed from a parcel *before* dispatch
+  is completely unaffected by everything that happens to the parcel
+  afterward — verified by splitting one of two members, dispatching
+  the parcel, then confirming the split order is still sitting at
+  `completed` while its former parcel-mate moved to `dispatched`.
+- An order already in one parcel can't join a second (409); dispatching
+  an already-dispatched parcel a second time is rejected (409).
+
+### How the cascade is actually implemented
+`cascadeToMembers()` walks each member order and calls the *exact
+same* `transitionOrder()` every other phase uses — never a bulk SQL
+`UPDATE` that would bypass state-machine validation or skip the
+real-time audit log for parcel-triggered changes. A parcel-driven
+transition is indistinguishable, per-order, from a staff member
+clicking the same action directly.
+
+### Verified live (111 tests total now pass, all against real Postgres, from a genuinely fresh `node_modules` + database)
+- An order that isn't yet `completed` can't be added to a parcel (409)
+- **Regression, explicitly re-checked**: Phase 9's original direct
+  `completed` → `delivered` path (no parcel at all) still works
+  unchanged
+- A staff identity without `logistics.manage` cannot create a parcel (403)
+
+## Next: Phase 12
+
+Per the blueprint's own module ordering: Inventory — product identity,
+warehouse-scoped stock, and concurrency-safe reservations, kept as its
+own isolated module (mirroring the original prototype's own Inventory
+Phase 1 scoping) rather than woven into the core Orders/Jobs tables.
