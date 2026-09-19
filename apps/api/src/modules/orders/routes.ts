@@ -37,7 +37,7 @@ export function createOrdersRouter(pool: pg.Pool): Router {
   // already found once in the CRM module's /customers/me). ---
 
   router.post("/orders/import", requireAuth(pool), requirePermission(pool, "orders.import"), async (req: Request, res: Response) => {
-    const { idempotencyKey, orgPrefix, productName, masterOrderId, shippingAddress, customerName, customerPhone, customerEmail, artworkIntent } = req.body ?? {};
+    const { idempotencyKey, orgPrefix, productName, orderValue, masterOrderId, shippingAddress, customerName, customerPhone, customerEmail, artworkIntent } = req.body ?? {};
     if (!idempotencyKey || !orgPrefix || !productName || !customerName) {
       return res.status(400).json({ error: "idempotencyKey, orgPrefix, productName, and customerName are required" });
     }
@@ -45,7 +45,7 @@ export function createOrdersRouter(pool: pg.Pool): Router {
       return res.status(400).json({ error: "artworkIntent must be one of: attachment, no, blank" });
     }
     const { order, wasNew } = await createOrder(pool, {
-      organizationId: req.identity!.organization_id, idempotencyKey, orgPrefix, productName, masterOrderId, shippingAddress,
+      organizationId: req.identity!.organization_id, idempotencyKey, orgPrefix, productName, orderValue, masterOrderId, shippingAddress,
       customerName, customerPhone, customerEmail, createdBy: req.identity!.id, artworkIntent,
     });
     if (wasNew) {

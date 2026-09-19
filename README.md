@@ -460,10 +460,76 @@ ledger row's own id kept in the remarks text.
   the separate `vendorrates.master.manage` cannot touch the master
   rate at all (403)
 
-## Next: Phase 9
+## Phase 9 — Finance & Invoicing (done)
 
-Per the blueprint's own module ordering: Finance & Invoicing —
-invoice generation gated strictly on Delivered (mirroring the same
-"hard gate checked at multiple independent points" discipline as
-Phase 5's print-ready check), and the Customer Ledger's own
-counterpart to this phase's Operator Ledger.
+Invoice generation, hard-gated on the order genuinely being delivered
+— not merely production-complete — plus the OTP-protected customer
+self-service download.
+
+### New endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| POST | /api/orders/:orderId/invoice | Staff: generate — **hard-gated on `delivered`** |
+| GET | /api/orders/:orderId/invoice | Staff: view |
+| POST | /api/invoices/:id/download/request-otp | Customer: OTP to their own registered mobile |
+| POST | /api/invoices/:id/download/verify-otp | Customer: verify, get the invoice |
+
+### The order lifecycle grew a genuinely new stage
+`orders.stage` gained `delivered`, distinct from `completed` —
+"production work is finished" and "the customer has actually received
+it" are different real-world facts, and invoicing only makes sense
+gated on the second one. A new `deliver` transition (`completed` →
+`delivered`) slots into the same state machine Phase 4 built; no new
+route was needed since the existing generic `/orders/:id/:action`
+already handles it.
+
+### FIN-001 and FIN-002, both verified in both directions
+- An order that's only `completed` cannot be invoiced (409, naming
+  the actual stage); a genuinely `delivered` one can, for exactly its
+  `order_value`. A second invoice for the same order is rejected —
+  one per order.
+- Invoice download requires an OTP sent to the customer's own
+  **registered** mobile (`identity.phone`), never a number the
+  request supplies. Ownership is checked against the verified
+  session before any OTP logic even runs — a stranger can't request
+  one for someone else's invoice, and can't verify one even with a
+  stolen `otpRequestId`. 3 incorrect attempts locks it out, even
+  against a subsequent correct guess.
+
+### The OTP service itself — built now, reused going forward
+Phase 2 created the `otp_requests`/`otp_channel_deliveries` tables but
+never built a service layer on top of them (noted honestly in that
+phase's own README section rather than left as a silent gap). Built
+here in `apps/api/src/modules/identity/otp.service.ts` — genuinely
+reusable by `purpose`, not a parallel mechanism invented just for
+invoices. A future Customer/Partner OTP login would use this exact
+same service.
+
+### A real architectural bug found by running the FULL pipeline together
+Every phase so far has been verified with `npm run verify` end to end,
+but this is the first time that full run surfaced something isolated
+runs couldn't: `packages/database`'s own migration-rollback test shares
+one database with `apps/api`'s application tests. Migration 0017
+tightens `orders_stage_check` to allow `delivered`; rolling it back
+re-narrows that constraint — which Postgres correctly refuses once
+real `delivered` rows already exist (exactly the finance tests'
+own data). The schema test was silently depending on which workspace's
+tests happened to run first, never a real guarantee. Fixed at the
+root: `packages/database`'s tests now create, migrate, and tear down
+their own fully isolated database, never touching whatever `apps/api`
+leaves behind in the shared one. `createPool()` gained an optional env
+override to make this possible without mutating `process.env` for the
+whole process.
+
+### Verified live (93 tests total now pass, all against real Postgres, from a genuinely fresh `node_modules` + database)
+- Invoice numbers (`ANILYA/INV/2026/00001` format) generated via the
+  same race-condition-safe row-locked counter pattern as Orders (Phase 4)
+- The OTP's hash in the database is never the raw code
+- A staff identity without `invoices.generate` cannot generate one (403)
+
+## Next: Phase 10
+
+Per the blueprint's own module ordering: Complaints & Resolution —
+post-delivery tickets, evidence upload, and Manager-only refund/
+replacement resolution that reuses this phase's Customer Ledger
+(Phase 3) rather than building a parallel payment-adjustment system.

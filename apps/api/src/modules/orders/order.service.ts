@@ -11,6 +11,7 @@ export interface Order {
   master_order_id: string | null;
   display_order_number: string;
   product_name: string;
+  order_value: string;
   stage: OrderStage;
   shipping_address: string | null;
   tracking_token: string;
@@ -27,7 +28,7 @@ export interface Order {
 export async function createOrder(
   pool: pg.Pool,
   params: {
-    organizationId: string; idempotencyKey: string; orgPrefix: string; productName: string;
+    organizationId: string; idempotencyKey: string; orgPrefix: string; productName: string; orderValue?: number;
     masterOrderId?: string; shippingAddress?: string; customerName: string; customerPhone?: string; customerEmail?: string;
     createdBy?: string;
     // ART-001: decided ONCE, here, at import — never guessed later from
@@ -62,9 +63,9 @@ export async function createOrder(
     const displayOrderNumber = await nextDisplayOrderNumber(client, params.organizationId, params.orgPrefix);
 
     const { rows } = await client.query<Order>(
-      `INSERT INTO orders (organization_id, customer_identity_id, idempotency_key, master_order_id, display_order_number, product_name, shipping_address, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [params.organizationId, customer.identity_id, params.idempotencyKey, params.masterOrderId ?? null, displayOrderNumber, params.productName, params.shippingAddress ?? null, params.createdBy ?? null]
+      `INSERT INTO orders (organization_id, customer_identity_id, idempotency_key, master_order_id, display_order_number, product_name, order_value, shipping_address, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [params.organizationId, customer.identity_id, params.idempotencyKey, params.masterOrderId ?? null, displayOrderNumber, params.productName, params.orderValue ?? 0, params.shippingAddress ?? null, params.createdBy ?? null]
     );
 
     // ART-001/ART-003 derivation, right here at creation, once: a
