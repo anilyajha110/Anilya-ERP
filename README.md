@@ -842,7 +842,9 @@ a high-entropy secret. That's exactly the kind of tuning a real
 scanner needs — fixed by excluding `*.test.ts`/`*.spec.ts` from that
 one pattern (application, migration, and config code are never
 exempted, only test fixtures). Then verified the *other* direction:
-planted a real fake AWS key (`AKIAIOSFODNN7EXAMPLE`) directly in a
+planted a real fake AWS-shaped key (the well-known
+`AKIA`-prefixed example format AWS's own documentation uses for this
+exact purpose) directly in a
 genuine source file, confirmed the scanner caught it immediately, then
 removed it and confirmed a clean scan again — proof this tool actually
 works, not just that it never happens to fire.
@@ -854,6 +856,16 @@ works, not just that it never happens to fire.
   393-component SBOM)
 - The complete `npm run verify` chain — now including both new gates —
   still passes end to end from a genuinely fresh `node_modules` and database
+
+### Two more real bugs found — not by writing new code, but by actually watching CI run
+Everything above was verified with local commands standing in for what CI runs. The genuinely important step was checking the **Actions tab itself** after pushing — which nobody, including me, had done before. It showed something worth knowing accurately: CI *had* been running on every push all along (my claim earlier in this same section, that the push trigger never fired, was wrong — inferred from reading the YAML rather than checking) — but **every run had been failing**, unnoticed, since Phase 7.
+
+Reproducing the exact failing commit locally (`git clone` the real pushed repo, `npm ci` — not `npm install` — exactly as CI does) surfaced two genuine, fixable bugs in this phase's own new gates:
+
+1. **`npm audit` depends on a live external service, and that service was failing.** First against npm's old "quick audit" endpoint (a hard 400: "this endpoint is being retired"); after upgrading npm to use its documented replacement, *that* endpoint returned a 503: "currently performing maintenance." Neither is a real vulnerability finding, but a bare `npm audit` in CI can't tell the difference — it blocks the whole pipeline on a registry hiccup exactly as readily as on a genuine CVE. Fixed with `scripts/audit-check.js`: retries a few times, and only if the registry is still visibly saying "unavailable"/"maintenance" (not "found vulnerabilities") does it print a loud, unmissable warning and exit cleanly rather than hard-blocking on an outage outside this project's control. A genuine vulnerability finding still fails the build immediately, as it should.
+2. **The secret scanner flagged the README describing its own test.** The line documenting the fake AWS key planted earlier in this exact phase (to prove the scanner works) contained the literal key string — which the scanner correctly matched, since it can't tell "this text is describing a test" from "this text is a secret." Fixed by rephrasing the documentation to describe the format without reproducing the literal matching string.
+
+Older CI runs (Phases 7 through 14) still show as failed on GitHub, and that's left as-is rather than rewritten — each is a frozen snapshot of a specific commit, and if an intermediate phase's code had an issue a later phase's own changes happened to fix, that's ordinary iteration, not something to retroactively edit history for. What matters is that the current commit, reproduced faithfully end to end exactly as CI runs it, is genuinely green.
 
 ## Next: Phase 16
 

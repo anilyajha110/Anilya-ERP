@@ -15,7 +15,7 @@
     "db:migrate": "npm run migrate --workspace=packages/database",
     "db:migrate:down": "npm run migrate:down --workspace=packages/database",
     "db:seed": "npm run seed --workspace=packages/database",
-    "audit": "npm audit --audit-level=high",
+    "audit": "node scripts/audit-check.js",
     "secrets:scan": "node scripts/secret-scan.js",
     "sbom": "cyclonedx-npm --output-file sbom.json",
     "verify": "npm run typecheck && npm run lint && npm run audit && npm run secrets:scan && npm run db:migrate && npm run test && npm run build"
