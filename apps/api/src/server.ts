@@ -1,10 +1,13 @@
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { pinoHttp } from "pino-http";
+import cors from "cors";
+import helmet from "helmet";
 import pg from "pg";
 import { pathToFileURL } from "node:url";
 import { loadConfig, type Config } from "./config/config.js";
 import { createLogger, type Logger } from "./shared/logger.js";
 import { correlationIdMiddleware } from "./shared/correlation-id.js";
+import { authRateLimiter } from "./shared/rate-limit.js";
 import { createHealthRouter } from "./shared/health.js";
 import { createIdentityRouter } from "./modules/identity/routes.js";
 import { createCrmRouter } from "./modules/crm/routes.js";
@@ -40,7 +43,30 @@ export function buildApp(config: Config, pool: pg.Pool, logger: Logger): Express
       },
     })
   );
+  app.use(helmet());
+  // Phase 14 (closes RISK-011): closed by default, never open-until-
+  // configured. An empty allowedOrigins list (the safe default) means
+  // the cors package's own origin callback rejects every cross-origin
+  // request — same-origin and server-to-server calls (which don't send
+  // an Origin header at all) are unaffected either way.
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin || config.allowedOrigins.includes(origin)) return callback(null, true);
+        callback(new Error("Not allowed by CORS"));
+      },
+    })
+  );
   app.use(express.json({ limit: "1mb" }));
+
+  // Phase 14: brute-force protection on the specific endpoints where it
+  // actually matters — applied here, once, rather than inside every
+  // router file, so the exact set of rate-limited paths is visible in
+  // one place. Matched by path, ahead of the routers that actually
+  // handle them (Express runs middleware in registration order).
+  app.use("/api/identities/login", authRateLimiter);
+  app.use("/api/invoices/:id/download/request-otp", authRateLimiter);
+  app.use("/api/invoices/:id/download/verify-otp", authRateLimiter);
 
   app.use(createHealthRouter(pool));
   app.use("/api", createIdentityRouter(pool, {

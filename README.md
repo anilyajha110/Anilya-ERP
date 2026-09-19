@@ -749,12 +749,63 @@ the API) was tried and rejected by Postgres itself.
   since Phase 2)
 - A staff identity without `notifications.send` cannot send one (403)
 
-## Next: Phase 14
+## Phase 14 — Security Hardening (done)
 
-With the core business modules now substantially complete (Identity
-through Notifications), Phase 14 turns to closing out the remaining
-SECURITY BLOCKER items from the Phase 0 Risk Register itself — CORS
-default-open until explicitly configured (RISK-011), and a genuine
-automated security regression suite (RISK-010) that re-verifies every
-"tested live" security property in this README on every single run,
-not just once when each phase was first built.
+Closes the remaining SECURITY BLOCKER items from the Phase 0 Risk
+Register itself. No new database migration this phase — this is
+entirely application-layer: config validation, middleware, and a
+dedicated regression suite.
+
+### What actually changed
+- **CORS (closes RISK-011)** — `cors` added, closed by default. An
+  empty `ALLOWED_ORIGINS` (the default) means *no* cross-origin browser
+  request is ever allowed — not "open until configured." Production
+  specifically **must** set `ALLOWED_ORIGINS` explicitly, or the
+  process refuses to start at all (the same "fail loud at startup"
+  discipline as every other config value since Phase 1).
+- **Rate limiting on authentication** — `express-rate-limit`, 10
+  attempts per 15 minutes, applied specifically to
+  `/api/identities/login` and the invoice-OTP request/verify
+  endpoints — not globally (a tight limit on every `GET` would just be
+  an availability problem for real traffic).
+- **Helmet** — standard security headers on every response
+  (`X-Content-Type-Options`, and `X-Powered-By` stripped so the
+  framework isn't advertised).
+- **`security.test.ts`** — closes RISK-010 ("no automated security
+  regression suite... every finding was verified by hand, once"). One
+  dedicated file that re-proves the cross-cutting security properties
+  every phase has relied on individually, and re-runs on every single
+  `npm run verify`, not just once when each phase was first built.
+
+### A real interaction the test suite itself caught
+Adding the rate limiter immediately broke 3 previously-passing tests
+in `finance.test.ts` — not because anything was wrong with Finance, but
+because `authRateLimiter` is a single shared instance across the whole
+process, and Node caches modules: every test *file* that imports
+`server.ts` shares the same in-memory hit counter. Accumulated traffic
+from unrelated test files was genuinely tripping the real limiter.
+Fixed by skipping the limiter under `NODE_ENV=test` by default, with a
+`X-Test-Rate-Limit` header that opts back into the real code path —
+used by exactly one test, which sends 11 real login attempts and
+confirms the 11th is genuinely rejected (429), proving the limiter's
+actual behavior rather than just its configuration.
+
+### Verified live (133 tests total now pass, all against real Postgres, from a genuinely fresh `node_modules` + database)
+- A request from a disallowed origin gets no
+  `Access-Control-Allow-Origin` header at all; a request from an
+  explicitly allowed one gets exactly the matching header
+- `password_hash` never appears anywhere in a registration or login
+  response body — checked by string-searching the actual JSON, not
+  just checking the TypeScript type
+- A classic SQL injection payload (`Robert'); DROP TABLE organizations;--`)
+  submitted as a display name is stored and returned back **literally**
+  — `organizations` still has rows afterward, checked directly
+- An error response (an invalid Bearer token) contains no stack trace,
+  no server file paths, no `node_modules` references
+
+## Next: Phase 15
+
+The CI workflow (`.github/workflows/ci.yml`) has carried two explicit
+TODO placeholders since Phase 1 — dependency/secret scanning and SBOM
+generation — the last two items from the blueprint's own supply-chain
+baseline that haven't been wired in for real yet.
