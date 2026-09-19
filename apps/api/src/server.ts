@@ -15,6 +15,7 @@ import { createJobsRouter } from "./modules/jobs/routes.js";
 import { createVendorRateRouter } from "./modules/vendor-rates/routes.js";
 import { createOperatorLedgerRouter } from "./modules/operator-ledger/routes.js";
 import { createFinanceRouter } from "./modules/finance/routes.js";
+import { createComplaintsRouter } from "./modules/complaints/routes.js";
 import { createGangRunRouter } from "./modules/gang-run/routes.js";
 
 // Exported as a factory (not "start the server as a side effect of
@@ -57,6 +58,7 @@ export function buildApp(config: Config, pool: pg.Pool, logger: Logger): Express
   // 7's lesson) — /orders/:orderId/invoice is a specific path that
   // Orders' own generic /orders/:id/:action would otherwise swallow.
   app.use("/api", createFinanceRouter(pool));
+  app.use("/api", createComplaintsRouter(pool));
   app.use("/api", createOrdersRouter(pool));
   app.use("/api", createArtworkRouter(pool));
   app.use("/api", createGangRunRouter(pool));

@@ -527,9 +527,75 @@ whole process.
 - The OTP's hash in the database is never the raw code
 - A staff identity without `invoices.generate` cannot generate one (403)
 
-## Next: Phase 10
+## Phase 10 — Complaints & Resolution (done)
 
-Per the blueprint's own module ordering: Complaints & Resolution —
-post-delivery tickets, evidence upload, and Manager-only refund/
-replacement resolution that reuses this phase's Customer Ledger
-(Phase 3) rather than building a parallel payment-adjustment system.
+Post-delivery tickets, evidence, and Manager-only resolution — with
+the single most safety-critical rule in this module now genuinely
+enforced: a customer can only ever *request* a resolution; only a
+separately-permissioned Manager action can actually move money or
+create a replacement order.
+
+### New endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| POST | /api/orders/:orderId/complaints | Customer: raise a ticket on their own order |
+| GET | /api/orders/:orderId/complaints | Staff: list — **one order can have many tickets** |
+| GET | /api/complaints/:id | View one ticket |
+| POST | /api/complaints/:id/status | Staff: move through review states |
+| POST | /api/complaints/:id/evidence | Attach evidence — always the SAME ticket |
+| POST | /api/complaints/:id/resolve | **Manager-only, its own permission** |
+
+### CMP-003 — the rule that matters, verified both directions
+The customer's `requestedResolution` is stored as free text and never
+read by anything that changes state — it's a wish, not a decision.
+Only `resolveTicket()`, reachable exclusively through the separately-
+permissioned `complaints.resolve` (distinct from ordinary
+`complaints.manage` — the same "narrower permission for the most
+consequential action" pattern as Phase 5's print-approval and Phase
+7's escalation resolution), can actually do anything. Verified live:
+staff with `complaints.manage` but not `complaints.resolve` is
+rejected (403); a refund resolution reuses the **existing** Customer
+Ledger (Phase 3) rather than a parallel payment system — checked by
+reading the actual ledger balance before and after and confirming it
+moved by exactly the refunded amount.
+
+### CMP-006 — replacement genuinely isolated from the original
+A `replacement` resolution creates a real new order (through the same
+`createOrder()` Phase 4 built) and links it via `replacement_order_id`
+on the ticket — never by touching the original order's own row.
+Verified live: the original order's `stage` was `delivered` before
+resolving, and still exactly `delivered` after; the new replacement
+order exists independently at `imported`, its own fresh lifecycle.
+
+### CMP-007 — one audit trail, not a fourth parallel one
+The Phase 0 audit had flagged the prototype's own complaint module for
+keeping a *separate* audit table from everything else — one of four
+independent, non-unified audit mechanisms found in that review. Fixed
+here by construction: complaint actions log through the exact same
+`logActivity()`/`audit_log` every phase since Phase 2 has used,
+`entity_type = 'complaint_ticket'` simply being one more value in that
+one shared table.
+
+### A real bug this phase's own tests caught (a test setup mistake, not application logic)
+The CMP-006 test initially failed — not because replacement isolation
+was broken, but because the test's own staff role was never granted
+`orders.read`, so checking the original order's stage returned nothing
+useful. A good reminder that a failing assertion doesn't automatically
+mean the code under test is wrong — this one, once traced, was the
+test's own setup.
+
+### Verified live (103 tests total now pass, all against real Postgres, from a genuinely fresh `node_modules` + database)
+- A different customer can't raise a ticket against someone else's
+  order, and can't attach evidence to someone else's ticket (403 both times)
+- Evidence added while a ticket is `evidence_required` moves that
+  exact ticket back to `under_review` — same ticket id, confirmed directly
+- A refund resolution with no `refundAmount` is rejected (409) before
+  anything touches the ledger
+- Resolving an already-resolved ticket a second time is rejected (409)
+
+## Next: Phase 11
+
+Per the blueprint's own module ordering: Logistics — parcel bundling
+for dispatch and real Dispatched/Out-for-Delivery granularity between
+`completed` and `delivered`, which Phase 9 deliberately left as a
+single direct transition for Finance's own purposes.
